@@ -1,0 +1,94 @@
+---
+title: "operon_detection"
+format: html
+editor: visual
+---
+
+## Quarto
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(rtracklayer)
+library(purrr)
+```
+
+6.Cobetia_litoralis_NRIC_0814T_GCF_029846315.1
+
+10.Cobetia_amphilecti_NRIC_0815T_GCF_030010415.1
+
+23.Cobetia_pacifica_NRIC_0813T_GCF_030010515.1
+
+28.Cobetia_marinaT1_GCF_005144735.1
+
+32.Cobetia_marina_JCM_21022T_GCF_001720485.1
+
+36.Cobetia_crustatorum_JO1T_GCF_000591415.1
+
+```{r}
+gtf <- readGFF("data/gtf/23.Cobetia_pacifica_NRIC_0813T_GCF_030010515.1.gtf")
+lofi <- read_delim("data/predictions/23.Cobetia_pacifica_NRIC_0813T_GCF_030010515.1_predictions.tsv", delim = "\t", escape_double = FALSE, trim_ws = TRUE) %>% 
+  select(-`...1`)
+
+
+```
+
+Найдем уникальные seqid
+
+```{r}
+gtf %>% select(seqid) %>% unique()
+lofi %>% select(contig) %>% unique()
+```
+
+```{r}
+gtf_fixed <- gtf %>%
+  separate(seqid, into = c("V1", NA), sep = "\\.", ) %>% 
+  separate(V1, into = c(NA, "contig"), sep = "NZ_JARWKV0100000", ) %>% 
+  tibble() %>% 
+  filter(type == "CDS") %>% 
+  mutate(contig = as.integer(contig)) %>% 
+  select(contig, start, end, product, gene)
+lofi_fixed <- lofi %>% 
+  separate(contig, into = c(NA, "contig"), sep = "_") %>% 
+  mutate(contig = as.integer(contig),
+         operon_number = ifelse(operon_number == "non_operon", NA, operon_number)) %>% 
+  select(contig, start, end, operon_number)
+lofi_fixed %>% str()
+```
+
+Добавим данные об опероне в общий датафрейм
+
+```{r}
+gtf_operon <- bind_rows(gtf_fixed, lofi_fixed) %>% 
+  arrange(contig, start, end)
+```
+
+Найдем нашу фосфатазу.
+
+```{r}
+
+selected_product <- "alkaline phosphatase D family protein"
+
+# Найдем строки, где product совпадает с selected_product
+product_rows <- gtf_operon %>% 
+  filter(product == selected_product)
+
+# Получаем индексы строк, где найден продукт
+product_indices <- which(gtf_operon$product == selected_product)
+
+# Создадим вектор индексов, чтобы получить окрестности для каждой строки
+context_indices <- unlist(lapply(product_indices, function(idx) {
+  # Индексы для окрестностей: по 5 строк до и после
+  start_index <- max(1, idx - 5)  # Ограничим минимум до первой строки
+  end_index <- min(nrow(gtf_operon), idx + 5)  # Ограничим максимум до последней строки
+  return(start_index:end_index)
+}))
+
+# Убираем дубликаты, если они есть, и сортируем индексы
+context_indices <- unique(sort(context_indices))
+
+# Извлекаем строки по этим индексам
+context_rows <- gtf_operon[context_indices, ]
+
+# Выводим результат
+head(context_rows)
+```
